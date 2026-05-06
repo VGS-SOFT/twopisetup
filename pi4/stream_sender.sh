@@ -7,7 +7,7 @@
 # Low-latency: intra-refresh every 30 frames, baseline profile
 # ============================================================
 
-PIANPR_IP="${1:-192.168.137.200}"   # pass IP as argument: bash stream_sender.sh <IP>
+PIANPR_IP="192.168.137.200"   # pass IP as argument: bash stream_sender.sh <IP>
 PORT=5555
 BITRATE=8000000                      # 8 Mbps — excellent quality for 1080p30
 FPS=30
