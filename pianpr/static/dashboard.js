@@ -1,11 +1,8 @@
 /**
  * dashboard.js
- * Handles:
- * 1. WebRTC connection -> live video
- * 2. WebSocket -> live plate results
- * 3. Canvas overlay for bounding boxes
- * 4. Detection log table
- * 5. Live stats bar: FPS, bitrate, ping, data received, packets
+ * Video: MediaMTX WebRTC (port 8889) - handles 60fps delivery natively
+ * ANPR:  FastAPI WebSocket (port 8000) - plate results, detection log
+ * Stats: WebRTC getStats() - FPS, bitrate, ping, packets
  */
 
 const video       = document.getElementById('live-feed');
@@ -19,7 +16,6 @@ const logBody     = document.getElementById('log-body');
 const streamBadge = document.getElementById('stream-status');
 const detectBadge = document.getElementById('detection-status');
 
-// Stats elements
 const statFps     = document.getElementById('stat-fps');
 const statBitrate = document.getElementById('stat-bitrate');
 const statPing    = document.getElementById('stat-ping');
@@ -28,22 +24,26 @@ const statPackets = document.getElementById('stat-packets');
 const statLost    = document.getElementById('stat-lost');
 const statRes     = document.getElementById('stat-res');
 
-const HOST     = window.location.hostname;
-const WS_URL   = `ws://${HOST}:8000/ws/plates`;
-const OFFER_URL = `http://${HOST}:8000/offer`;
+const HOST = window.location.hostname;
 
-// ── WebRTC ────────────────────────────────────────────────────────────────
+// MediaMTX serves WebRTC on 8889
+const MEDIAMTX_WHEP = `http://${HOST}:8889/gate/whep`;
+
+// FastAPI still serves ANPR WebSocket on 8000
+const WS_URL = `ws://${HOST}:8000/ws/plates`;
+
+// ── MediaMTX WebRTC via WHEP protocol ──────────────────────────────────────
+// WHEP = WebRTC HTTP Egress Protocol
+// MediaMTX exposes a standard WHEP endpoint - much simpler than manual SDP
 
 let pc = null;
 let statsInterval = null;
+let prevStats = { bytes: 0, packets: 0, ts: Date.now(), frames: 0 };
 
-// Tracks previous stats for delta calculations
-let prevStats = { bytes: 0, packets: 0, ts: 0, frames: 0 };
+async function startMediaMTX() {
+  if (pc) { try { pc.close(); } catch(e){} pc = null; }
 
-async function startWebRTC() {
-  if (pc) { pc.close(); pc = null; }
-
-  pc = new RTCPeerConnection({ iceServers: [] }); // LAN only
+  pc = new RTCPeerConnection({ iceServers: [] });
 
   pc.ontrack = (event) => {
     if (event.track.kind === 'video') {
@@ -51,7 +51,8 @@ async function startWebRTC() {
       video.onloadedmetadata = () => {
         noSignal.classList.add('hidden');
         updateStreamBadge(true);
-        syncCanvasSize();
+        canvas.width  = video.videoWidth  || 1280;
+        canvas.height = video.videoHeight || 720;
         startStatsPolling();
       };
     }
@@ -62,11 +63,12 @@ async function startWebRTC() {
       updateStreamBadge(false);
       noSignal.classList.remove('hidden');
       stopStatsPolling();
-      setTimeout(startWebRTC, 3000);
+      setTimeout(startMediaMTX, 3000);
     }
   };
 
   pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'recvonly' });
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
@@ -74,28 +76,29 @@ async function startWebRTC() {
   // Wait for ICE gathering
   await new Promise(resolve => {
     if (pc.iceGatheringState === 'complete') return resolve();
-    pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState === 'complete') resolve();
+    };
     setTimeout(resolve, 2000);
   });
 
   try {
-    const res    = await fetch(OFFER_URL, {
+    // WHEP: POST the SDP offer, get SDP answer back
+    const res = await fetch(MEDIAMTX_WHEP, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+      headers: { 'Content-Type': 'application/sdp' },
+      body: pc.localDescription.sdp
     });
-    const answer = await res.json();
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-  } catch (e) {
-    console.error('[WebRTC] Offer failed:', e);
-    setTimeout(startWebRTC, 3000);
-  }
-}
 
-// Sync canvas size to video element for accurate bbox overlay
-function syncCanvasSize() {
-  canvas.width  = video.videoWidth  || 1280;
-  canvas.height = video.videoHeight || 720;
+    if (!res.ok) throw new Error(`WHEP ${res.status}: ${await res.text()}`);
+
+    const answerSdp = await res.text();
+    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+  } catch (e) {
+    console.error('[MediaMTX] WHEP failed:', e);
+    setTimeout(startMediaMTX, 3000);
+  }
 }
 
 // ── Stats Polling ─────────────────────────────────────────────────────
@@ -107,32 +110,18 @@ function startStatsPolling() {
 }
 
 function stopStatsPolling() {
-  if (statsInterval) clearInterval(statsInterval);
+  clearInterval(statsInterval);
   statsInterval = null;
-  resetStats();
-}
-
-function resetStats() {
-  statFps.textContent     = '--';
-  statBitrate.textContent = '-- kbps';
-  statPing.textContent    = '-- ms';
-  statBytes.textContent   = '-- MB';
-  statPackets.textContent = '--';
-  statLost.textContent    = '--';
-  statRes.textContent     = '--';
 }
 
 async function pollStats() {
   if (!pc) return;
-
   try {
     const stats = await pc.getStats();
     const now   = Date.now();
-    const dt    = (now - prevStats.ts) / 1000; // seconds since last poll
+    const dt    = (now - prevStats.ts) / 1000;
 
     stats.forEach(report => {
-
-      // — Inbound video stream stats
       if (report.type === 'inbound-rtp' && report.kind === 'video') {
         const bytes   = report.bytesReceived   || 0;
         const packets = report.packetsReceived || 0;
@@ -141,18 +130,10 @@ async function pollStats() {
         const w       = report.frameWidth      || 0;
         const h       = report.frameHeight     || 0;
 
-        // Bitrate kbps
-        const byteDelta = bytes - prevStats.bytes;
-        const kbps      = dt > 0 ? ((byteDelta * 8) / dt / 1000).toFixed(0) : 0;
-
-        // FPS
-        const frameDelta = frames - prevStats.frames;
-        const fps        = dt > 0 ? (frameDelta / dt).toFixed(1) : 0;
-
-        // Total data received MB
+        const kbps    = dt > 0 ? ((( bytes - prevStats.bytes) * 8) / dt / 1000).toFixed(0) : 0;
+        const fps     = dt > 0 ? ((frames - prevStats.frames) / dt).toFixed(1) : 0;
         const totalMB = (bytes / 1024 / 1024).toFixed(2);
 
-        // Update display
         statFps.textContent     = `${fps} fps`;
         statBitrate.textContent = `${kbps} kbps`;
         statBytes.textContent   = `${totalMB} MB`;
@@ -160,45 +141,23 @@ async function pollStats() {
         statLost.textContent    = lost;
         if (w && h) statRes.textContent = `${w}x${h}`;
 
-        // Colour coding
-        statFps.className     = 'stat-value' + (fps < 15 ? ' bad' : fps < 25 ? ' warn' : '');
+        statFps.className     = 'stat-value' + (fps < 15 ? ' bad' : fps < 45 ? ' warn' : '');
         statBitrate.className = 'stat-value' + (kbps < 500 ? ' bad' : kbps < 2000 ? ' warn' : '');
         statLost.className    = 'stat-value' + (lost > 50 ? ' bad' : lost > 10 ? ' warn' : '');
 
-        prevStats.bytes   = bytes;
-        prevStats.packets = packets;
-        prevStats.frames  = frames;
-        prevStats.ts      = now;
+        prevStats = { bytes, packets, ts: now, frames };
       }
 
-      // — Round-trip time (ping)
-      if (report.type === 'remote-inbound-rtp' && report.kind === 'video') {
-        const rtt = report.roundTripTime;
-        if (rtt !== undefined) {
-          const ms = (rtt * 1000).toFixed(0);
-          statPing.textContent  = `${ms} ms`;
-          statPing.className    = 'stat-value' + (ms > 150 ? ' bad' : ms > 60 ? ' warn' : '');
-        }
-      }
-
-      // — Candidate pair (fallback ping from currentRoundTripTime)
       if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-        if (report.currentRoundTripTime !== undefined) {
-          const ms = (report.currentRoundTripTime * 1000).toFixed(0);
-          // Only update if remote-inbound-rtp didn't already set it
-          if (statPing.textContent === '-- ms') {
-            statPing.textContent = `${ms} ms`;
-            statPing.className   = 'stat-value' + (ms > 150 ? ' bad' : ms > 60 ? ' warn' : '');
-          }
-        }
+        const ms = ((report.currentRoundTripTime || 0) * 1000).toFixed(0);
+        statPing.textContent  = `${ms} ms`;
+        statPing.className    = 'stat-value' + (ms > 150 ? ' bad' : ms > 60 ? ' warn' : '');
       }
     });
-  } catch (e) {
-    console.warn('[Stats] getStats error:', e);
-  }
+  } catch(e) { console.warn('[Stats]', e); }
 }
 
-// ── WebSocket ──────────────────────────────────────────────────────────────
+// ── WebSocket (ANPR results) ────────────────────────────────────────────────
 
 function startWebSocket() {
   const ws = new WebSocket(WS_URL);
@@ -212,7 +171,7 @@ function startWebSocket() {
 function handleDetection(data) {
   plateText.textContent = data.plate || '---';
   plateTime.textContent = data.timestamp || '';
-  plateConf.textContent = data.confidence ? `Confidence: ${(data.confidence * 100).toFixed(0)}%` : '';
+  plateConf.textContent = data.confidence ? `Confidence: ${(data.confidence*100).toFixed(0)}%` : '';
 
   plateText.classList.remove('flash');
   void plateText.offsetWidth;
@@ -233,37 +192,32 @@ function drawBBox(bbox) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.strokeStyle = '#f5c518';
   ctx.lineWidth   = 2.5;
-  ctx.strokeRect(x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY);
-
-  ctx.fillStyle = '#f5c518';
-  ctx.font      = 'bold 14px monospace';
-  ctx.fillText('PLATE', x1 * scaleX, (y1 * scaleY) - 6);
-
+  ctx.strokeRect(x1*scaleX, y1*scaleY, (x2-x1)*scaleX, (y2-y1)*scaleY);
+  ctx.fillStyle   = '#f5c518';
+  ctx.font        = 'bold 14px monospace';
+  ctx.fillText('PLATE', x1*scaleX, y1*scaleY - 6);
   setTimeout(() => ctx.clearRect(0, 0, canvas.width, canvas.height), 2500);
 }
 
 function addLogRow(data) {
   const empty = logBody.querySelector('.empty-row');
   if (empty) empty.closest('tr').remove();
-
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td>${data.plate}</td>
-    <td>${data.confidence ? (data.confidence * 100).toFixed(0) + '%' : '-'}</td>
+    <td>${data.confidence ? (data.confidence*100).toFixed(0)+'%' : '-'}</td>
     <td>${data.timestamp ? data.timestamp.split(' ')[1] : ''}</td>
   `;
   logBody.prepend(tr);
   while (logBody.rows.length > 50) logBody.deleteRow(logBody.rows.length - 1);
 }
 
-// ── Stream Badge ───────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function updateStreamBadge(connected) {
   streamBadge.textContent = connected ? 'Stream: Live' : 'Stream: Offline';
   streamBadge.className   = connected ? 'badge badge--success' : 'badge badge--error';
 }
-
-// ── Theme Toggle ───────────────────────────────────────────────────────────
 
 (function () {
   const btn  = document.querySelector('[data-theme-toggle]');
@@ -277,5 +231,5 @@ function updateStreamBadge(connected) {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 
-startWebRTC();
+startMediaMTX();
 startWebSocket();
