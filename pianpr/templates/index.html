@@ -26,11 +26,49 @@
     </div>
   </header>
 
+  <!-- Live stats bar -->
+  <div class="stats-bar">
+    <div class="stat-item">
+      <span class="stat-label">FPS</span>
+      <span class="stat-value" id="stat-fps">--</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-label">BITRATE</span>
+      <span class="stat-value" id="stat-bitrate">-- kbps</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-label">PING</span>
+      <span class="stat-value" id="stat-ping">-- ms</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-label">DATA RX</span>
+      <span class="stat-value" id="stat-bytes">-- MB</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-label">PACKETS</span>
+      <span class="stat-value" id="stat-packets">--</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-label">LOST</span>
+      <span class="stat-value" id="stat-lost">--</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-label">RESOLUTION</span>
+      <span class="stat-value" id="stat-res">--</span>
+    </div>
+  </div>
+
   <main>
     <section class="feed-section">
       <div class="video-wrapper">
         <video id="live-feed" autoplay playsinline muted></video>
-        <canvas id="overlay" width="1280" height="720"></canvas>
+        <canvas id="overlay"></canvas>
         <div id="no-signal" class="no-signal">Connecting to stream...</div>
       </div>
     </section>

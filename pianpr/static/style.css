@@ -9,6 +9,7 @@
   --color-error:       #a12c7b;
   --color-plate-bg:    #1a1a1a;
   --color-plate-text:  #f5c518;
+  --color-stats-bg:    #edeae5;
   --shadow-md: 0 4px 12px oklch(0.2 0.01 80 / 0.08);
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
@@ -27,6 +28,7 @@
   --color-error:       #d163a7;
   --color-plate-bg:    #111;
   --color-plate-text:  #f5c518;
+  --color-stats-bg:    #141412;
   --shadow-md: 0 4px 12px oklch(0 0 0 / 0.3);
 }
 
@@ -84,20 +86,67 @@ header {
   font-size: 1rem;
 }
 
+/* Stats bar */
+.stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--color-stats-bg);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 1.5rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.45rem 1.2rem;
+  gap: 0.15rem;
+  min-width: 80px;
+}
+.stat-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  transition: color 0.3s;
+}
+.stat-value.warn { color: #f5c518; }
+.stat-value.bad  { color: var(--color-error); }
+.stat-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
 /* Main layout */
 main {
   display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 1.5rem;
-  padding: 1.5rem;
+  grid-template-columns: 1fr 300px;
+  gap: 1.25rem;
+  padding: 1.25rem;
   flex: 1;
+  min-height: 0;
 }
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; }
 }
 
 /* Video feed */
-.feed-section { position: relative; }
+.feed-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .video-wrapper {
   position: relative;
   width: 100%;
@@ -111,7 +160,7 @@ video {
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  object-fit: contain;   /* show full frame, no crop */
 }
 canvas#overlay {
   position: absolute;
@@ -129,6 +178,7 @@ canvas#overlay {
   color: var(--color-text-muted);
   font-size: 0.9rem;
   pointer-events: none;
+  transition: opacity 0.3s;
 }
 .no-signal.hidden { display: none; }
 
@@ -137,6 +187,7 @@ canvas#overlay {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  min-height: 0;
 }
 .panel-label {
   font-size: 0.7rem;
@@ -165,6 +216,15 @@ canvas#overlay {
   text-align: center;
   letter-spacing: 0.12em;
   margin: 0.5rem 0;
+  transition: transform 0.15s ease;
+}
+.plate-display.flash {
+  animation: plate-flash 0.4s ease;
+}
+@keyframes plate-flash {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.04); }
+  100% { transform: scale(1); }
 }
 .plate-time, .plate-conf {
   font-size: 0.75rem;
@@ -179,7 +239,7 @@ canvas#overlay {
   border-radius: var(--radius-lg);
   padding: 1.25rem;
   flex: 1;
-  overflow: hidden;
+  overflow: auto;
 }
 .log-table {
   width: 100%;
