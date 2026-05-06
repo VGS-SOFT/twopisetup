@@ -1,20 +1,19 @@
 # ============================================================
 # piANPR — FastAPI app
 # Serves browser UI on :8000
-# Reads UDP stream for ANPR (independent of MediaMTX)
+# Reads RTSP from MediaMTX for ANPR (no UDP port conflict)
 # WebSocket pushes ANPR results live to browser
-# MediaMTX (separate process) handles WebRTC video on :8889
+# MediaMTX handles WebRTC video delivery on :8889
 # ============================================================
 
 import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 
 from database import Database
 from stream_ingest import StreamIngest
@@ -25,10 +24,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("app")
 
-db  = Database()
+db     = Database()
 ingest = StreamIngest()
 
-# ── connected WebSocket clients ──────────────────────────────
 clients: list[WebSocket] = []
 
 async def broadcast(data: dict):
@@ -41,7 +39,6 @@ async def broadcast(data: dict):
     for ws in dead:
         clients.remove(ws)
 
-# ── lifespan: start/stop background tasks ───────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("[DB] Initialising database")
@@ -53,11 +50,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+except Exception:
+    pass   # static folder optional
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    # Compatible with both old and new Starlette/Jinja2
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html"
+    )
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -65,9 +70,10 @@ async def websocket_endpoint(ws: WebSocket):
     clients.append(ws)
     try:
         while True:
-            await ws.receive_text()   # keep alive — browser sends pings
+            await ws.receive_text()
     except WebSocketDisconnect:
-        clients.remove(ws)
+        if ws in clients:
+            clients.remove(ws)
 
 if __name__ == "__main__":
     import uvicorn

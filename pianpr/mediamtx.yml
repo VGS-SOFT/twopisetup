@@ -1,30 +1,26 @@
 # ============================================================
 # MediaMTX config for piANPR receiver
-# Pi4 pushes MPEG-TS H.264 → piANPR UDP:5555
-# MediaMTX listens on UDP:5555 and serves WebRTC WHEP on :8889
-# Tested with MediaMTX v1.9.3
+# Pi4 pushes MPEG-TS H.264 -> piANPR UDP:5555
+# MediaMTX owns UDP:5555, re-serves as RTSP + WebRTC
+# Python reads RTSP from MediaMTX (no port conflict)
+# Tested: MediaMTX v1.9.3
 # ============================================================
 
 logLevel: info
 logDestinations: [stdout]
 
-# WebRTC — browser gets stream from here
-webrtcAddress: :8889
-webrtcICEServers: []
-
-# Disable unused protocols
 rtspAddress:    :8554
 rtmpAddress:    :1935
+webrtcAddress:  :8889
+webrtcICEServers: []
 hls:            no
 hlsAddress:     :8888
 record:         no
 
 paths:
   gate:
-    # Pi4 pushes MPEG-TS into this UDP port
-    # udpListener = MediaMTX binds and listens on this port
-    source: udp://localhost:5555
-    # No auth — LAN only
+    # MediaMTX binds UDP:5555 and receives MPEG-TS from Pi4
+    source: udp://0.0.0.0:5555
     readUser:
     readPass:
     overridePublisher: yes
