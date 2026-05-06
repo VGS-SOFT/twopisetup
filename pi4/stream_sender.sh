@@ -1,22 +1,22 @@
 #!/bin/bash
 # ============================================================
-# Pi4 Camera Sender — 180p30 H.264 over UDP
+# Pi4 Camera Sender — 1080p30 H.264 over UDP
 # Target: piANPR at PIANPR_IP:5555
 # Codec:  Hardware H.264 via V4L2 (no software encode)
-# Bitrate: 2000000 (2 Mbps — highest useful for 320x180)
-# Low-latency: intra-refresh every 30 frames, no B-frames
+# Bitrate: 8000000 (8 Mbps — highest stable for 1080p30 on Pi4)
+# Low-latency: intra-refresh every 30 frames, baseline profile
 # ============================================================
 
-PIANPR_IP="${1:-192.168.1.100}"   # pass IP as argument or edit default
+PIANPR_IP="${1:-192.168.137.200}"   # pass IP as argument: bash stream_sender.sh <IP>
 PORT=5555
-BITRATE=2000000                    # 2 Mbps — overkill for 180p, crystal clear
+BITRATE=8000000                      # 8 Mbps — excellent quality for 1080p30
 FPS=30
-WIDTH=320
-HEIGHT=180
+WIDTH=1920
+HEIGHT=1080
 
-echo "[Pi4 Sender] Starting 180p30 H.264 UDP stream"
+echo "[Pi4 Sender] Starting 1080p30 H.264 UDP stream"
 echo "  Target  : udp://${PIANPR_IP}:${PORT}"
-echo "  Bitrate : ${BITRATE} bps"
+echo "  Bitrate : ${BITRATE} bps  (8 Mbps)"
 echo "  Size    : ${WIDTH}x${HEIGHT} @ ${FPS}fps"
 echo ""
 
