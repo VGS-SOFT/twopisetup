@@ -1,0 +1,16 @@
+# FastAPI + server
+fastapi
+uvicorn[standard]
+python-multipart
+
+# WebRTC
+aiortc
+
+# Async utilities
+aiofiles
+
+# YOLO
+ultralytics
+
+# Database
+aiosqlite

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>piANPR — Gate Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-label="piANPR">
+        <rect x="2" y="7" width="24" height="14" rx="3" stroke="currentColor" stroke-width="2"/>
+        <rect x="6" y="11" width="16" height="6" rx="1" fill="currentColor" opacity="0.15"/>
+        <text x="14" y="16.5" text-anchor="middle" font-size="5" font-family="monospace" fill="currentColor" font-weight="bold">ANPR</text>
+        <circle cx="5" cy="23" r="2" fill="currentColor" opacity="0.5"/>
+        <circle cx="23" cy="23" r="2" fill="currentColor" opacity="0.5"/>
+      </svg>
+      <span>piANPR</span>
+    </div>
+    <div class="status-bar">
+      <span id="stream-status" class="badge badge--error">Stream: Connecting...</span>
+      <span id="detection-status" class="badge badge--muted">Detection: Waiting</span>
+      <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">&#9790;</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="feed-section">
+      <div class="video-wrapper">
+        <video id="live-feed" autoplay playsinline muted></video>
+        <canvas id="overlay" width="1280" height="720"></canvas>
+        <div id="no-signal" class="no-signal">Connecting to stream...</div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="last-plate">
+        <p class="panel-label">Last Detected Plate</p>
+        <div id="plate-text" class="plate-display">---</div>
+        <div id="plate-time" class="plate-time"></div>
+        <div id="plate-conf" class="plate-conf"></div>
+      </div>
+
+      <div class="log-section">
+        <p class="panel-label">Detection Log</p>
+        <table class="log-table">
+          <thead>
+            <tr><th>Plate</th><th>Conf</th><th>Time</th></tr>
+          </thead>
+          <tbody id="log-body">
+            <tr><td colspan="3" class="empty-row">No detections yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
