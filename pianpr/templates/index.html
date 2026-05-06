@@ -41,8 +41,24 @@
       background: rgba(0,0,0,0.6);
       padding: 2px 8px;
       border-radius: 4px;
-      color: #7fff7f;
+      color: #ffcc00;
     }
+
+    /* ── manual play button (shown only when autoplay blocked) ── */
+    #playBtn {
+      display: none;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255,255,255,0.15);
+      border: 2px solid rgba(255,255,255,0.4);
+      border-radius: 50%;
+      width: 64px; height: 64px;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+    }
+    #playBtn svg { width: 28px; height: 28px; fill: #fff; }
 
     /* ── stats bar ── */
     #stats {
@@ -90,15 +106,19 @@
   <div id="videoWrap">
     <video id="vid" autoplay playsinline muted></video>
     <span id="status">Connecting…</span>
+    <!-- shown only if browser blocks autoplay -->
+    <button id="playBtn" aria-label="Play">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </button>
   </div>
 
   <div id="stats">
-    <div class="stat"><span class="stat-label">FPS</span><span class="stat-value" id="sFps">—</span></div>
+    <div class="stat"><span class="stat-label">FPS</span><span class="stat-value" id="sFps">0.0 fps</span></div>
     <div class="stat"><span class="stat-label">Latency</span><span class="stat-value" id="sLat">—</span></div>
-    <div class="stat"><span class="stat-label">Packets lost</span><span class="stat-value" id="sLoss">—</span></div>
+    <div class="stat"><span class="stat-label">Packets lost</span><span class="stat-value" id="sLoss">0</span></div>
     <div class="stat"><span class="stat-label">Bitrate in</span><span class="stat-value" id="sBr">—</span></div>
     <div class="stat"><span class="stat-label">Jitter</span><span class="stat-value" id="sJit">—</span></div>
-    <div class="stat"><span class="stat-label">Resolution</span><span class="stat-value" id="sRes">—</span></div>
+    <div class="stat"><span class="stat-label">Resolution</span><span class="stat-value" id="sRes">—x—</span></div>
   </div>
 
   <div id="log">
@@ -111,26 +131,57 @@
 const WHEP_URL = `http://${location.hostname}:8889/gate/whep`;
 const video    = document.getElementById('vid');
 const status   = document.getElementById('status');
+const playBtn  = document.getElementById('playBtn');
 
 let pc;
+let statsStarted = false;
+
+// ── attempt to play; show manual button if browser blocks it ──
+function tryPlay() {
+  video.play().then(() => {
+    playBtn.style.display = 'none';
+  }).catch(() => {
+    // autoplay blocked — show the play button so user can tap once
+    playBtn.style.display = 'flex';
+  });
+}
+
+playBtn.addEventListener('click', () => {
+  video.play();
+  playBtn.style.display = 'none';
+});
 
 async function startWebRTC() {
+  if (pc) {
+    pc.close();
+    pc = null;
+    statsStarted = false;
+  }
+
   pc = new RTCPeerConnection({
-    iceServers: [],    // LAN only, no STUN needed
+    iceServers: [],
     bundlePolicy: 'max-bundle'
   });
 
   pc.addTransceiver('video', { direction: 'recvonly' });
 
   pc.ontrack = e => {
+    // ── KEY FIX: assign srcObject then explicitly call play() ──
     video.srcObject = e.streams[0];
+    tryPlay();
+
     status.textContent = 'Live';
     status.style.color = '#7fff7f';
-    startStats(pc);
+
+    if (!statsStarted) {
+      statsStarted = true;
+      startStats(pc);
+    }
   };
 
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+    const s = pc.connectionState;
+    if (s === 'failed' || s === 'disconnected') {
       status.textContent = 'Reconnecting…';
       status.style.color = '#ffcc00';
       setTimeout(startWebRTC, 2000);
@@ -140,11 +191,19 @@ async function startWebRTC() {
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  const resp = await fetch(WHEP_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/sdp' },
-    body: pc.localDescription.sdp
-  });
+  let resp;
+  try {
+    resp = await fetch(WHEP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/sdp' },
+      body: pc.localDescription.sdp
+    });
+  } catch (err) {
+    status.textContent = 'MediaMTX unreachable — retrying…';
+    status.style.color = '#ff6666';
+    setTimeout(startWebRTC, 3000);
+    return;
+  }
 
   if (!resp.ok) {
     status.textContent = 'MediaMTX not ready — retrying…';
@@ -157,42 +216,52 @@ async function startWebRTC() {
   await pc.setRemoteDescription({ type: 'answer', sdp: answer });
 }
 
-// ── Live stats from WebRTC getStats() — no server polling ────
+// ── Live stats ────────────────────────────────────────────────
+// Latency = capture timestamp embedded in RTP vs local clock.
+// estimatedPlayoutTimestamp is in ms (DOMHighResTimestamp domain).
+// We measure it as: now - (estimatedPlayoutTimestamp - timeOrigin)
+// which gives the wall-clock delta between "frame was captured" and "now".
 let prevBytes = 0, prevTs = 0, prevFrames = 0;
 
 function startStats(pc) {
   setInterval(async () => {
+    if (!pc || pc.connectionState !== 'connected') return;
     const reports = await pc.getStats();
     reports.forEach(r => {
       if (r.type === 'inbound-rtp' && r.kind === 'video') {
-        const now    = r.timestamp;
-        const dt     = (now - prevTs) / 1000 || 1;
-        const dBytes = r.bytesReceived - prevBytes;
-        const dFrames= r.framesDecoded - prevFrames;
+        const now     = r.timestamp;                       // ms, monotonic
+        const dt      = Math.max((now - prevTs) / 1000, 0.001);
+        const dBytes  = Math.max(r.bytesReceived  - prevBytes,  0);
+        const dFrames = Math.max(r.framesDecoded  - prevFrames, 0);
 
         const fps    = (dFrames / dt).toFixed(1);
-        const br     = ((dBytes * 8) / dt / 1000).toFixed(0);  // kbps
-        const jitter = (r.jitter * 1000).toFixed(1);           // ms
+        const br     = ((dBytes * 8) / dt / 1000).toFixed(0);
+        const jitter = (r.jitter * 1000).toFixed(1);
         const lost   = r.packetsLost ?? 0;
-        const lat    = r.estimatedPlayoutTimestamp
-                       ? ((performance.now() - (r.estimatedPlayoutTimestamp - performance.timeOrigin)) / 1000).toFixed(0) + ' ms'
-                       : '—';
         const width  = r.frameWidth  ?? '—';
         const height = r.frameHeight ?? '—';
+
+        // Latency: difference between local wall clock and estimated playout time
+        // estimatedPlayoutTimestamp is a Unix-epoch ms value (not DOMHighResTimestamp)
+        let latStr = '—';
+        if (r.estimatedPlayoutTimestamp && r.estimatedPlayoutTimestamp > 1e12) {
+          const latMs = Date.now() - r.estimatedPlayoutTimestamp;
+          if (latMs > 0 && latMs < 5000) latStr = latMs.toFixed(0) + ' ms';
+        }
 
         document.getElementById('sFps').textContent  = fps + ' fps';
         document.getElementById('sBr').textContent   = br  + ' kbps';
         document.getElementById('sJit').textContent  = jitter + ' ms';
         document.getElementById('sLoss').textContent = lost;
         document.getElementById('sRes').textContent  = `${width}×${height}`;
-        document.getElementById('sLat').textContent  = lat;
+        document.getElementById('sLat').textContent  = latStr;
 
         prevBytes  = r.bytesReceived;
         prevTs     = now;
         prevFrames = r.framesDecoded;
       }
     });
-  }, 1000);   // updates every 1 second — fully live, no server call
+  }, 1000);
 }
 
 // ── WebSocket for ANPR plate results ─────────────────────────
@@ -205,14 +274,13 @@ ws.onmessage = e => {
     const d  = msg.data;
     const t  = new Date(d.ts * 1000).toLocaleTimeString();
     li.innerHTML = `<span class="plate">${d.plate}</span>
-                    <span class="conf">${(d.confidence*100).toFixed(0)}%  ${t}</span>`;
+                    <span class="conf">${(d.confidence*100).toFixed(0)}%&nbsp;&nbsp;${t}</span>`;
     const ul = document.getElementById('plateLog');
     ul.prepend(li);
     if (ul.children.length > 50) ul.removeChild(ul.lastChild);
   }
 };
 
-// keep WS alive
 setInterval(() => ws.readyState === 1 && ws.send('ping'), 10000);
 
 startWebRTC();
