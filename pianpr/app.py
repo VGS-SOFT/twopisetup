@@ -12,18 +12,15 @@ Endpoints:
 """
 
 import asyncio
-import json
 import logging
-import os
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 
 from aiortc import RTCPeerConnection, RTCSessionDescription
-from aiortc.contrib.media import MediaBlackhole
 
 from stream_ingest import stream
 from webrtc_track import UDPVideoTrack
@@ -32,12 +29,6 @@ import anpr_pipeline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-app = FastAPI(title="piANPR Dashboard")
-
-# Static files and templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
 
 # Active WebRTC peer connections
 peer_connections = set()
@@ -49,39 +40,41 @@ result_queue: asyncio.Queue = asyncio.Queue()
 ws_clients: list[WebSocket] = []
 
 
-@app.on_event("startup")
-async def startup():
-    # Initialise database
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ──
     await init_db()
 
-    # Start UDP stream ingest
     stream.start()
     logger.info("[App] Stream ingest started.")
 
-    # Pass queue to ANPR pipeline
     anpr_pipeline.init_queue(result_queue)
-
-    # Start ANPR pipeline as background task
     asyncio.create_task(anpr_pipeline.run_pipeline())
     logger.info("[App] ANPR pipeline started.")
 
-    # Start WebSocket broadcaster
     asyncio.create_task(broadcast_results())
     logger.info("[App] WebSocket broadcaster started.")
 
+    yield
 
-@app.on_event("shutdown")
-async def shutdown():
+    # ── Shutdown ──
     stream.stop()
     for pc in peer_connections:
         await pc.close()
+
+
+app = FastAPI(title="piANPR Dashboard", lifespan=lifespan)
+
+# Static files and templates
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 
 # ── Routes ──────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @app.post("/offer")
@@ -103,7 +96,6 @@ async def offer(request: Request):
             await pc.close()
             peer_connections.discard(pc)
 
-    # Add the live video track from UDP stream
     pc.addTrack(UDPVideoTrack())
 
     await pc.setRemoteDescription(offer_sdp)
@@ -118,16 +110,11 @@ async def offer(request: Request):
 
 @app.websocket("/ws/plates")
 async def plate_websocket(websocket: WebSocket):
-    """
-    WebSocket endpoint.
-    Browser connects here to receive real-time plate detection results.
-    """
     await websocket.accept()
     ws_clients.append(websocket)
     logger.info(f"[WS] Client connected. Total: {len(ws_clients)}")
     try:
         while True:
-            # Keep connection alive, data is pushed by broadcaster
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_clients.remove(websocket)
@@ -136,7 +123,6 @@ async def plate_websocket(websocket: WebSocket):
 
 @app.get("/api/recent")
 async def recent_detections():
-    """Returns last 20 plate detections from SQLite."""
     rows = await get_recent(20)
     return JSONResponse(rows)
 
@@ -153,9 +139,6 @@ async def health():
 # ── Background Tasks ─────────────────────────────────────────────────────────
 
 async def broadcast_results():
-    """
-    Reads from result_queue and pushes to all connected WebSocket clients.
-    """
     while True:
         result = await result_queue.get()
         dead = []
