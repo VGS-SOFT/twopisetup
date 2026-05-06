@@ -9,7 +9,7 @@ aiortc
 # Async utilities
 aiofiles
 
-# YOLO
+# YOLO (ultralytics - torch must be installed separately first, see INSTALL.md)
 ultralytics
 
 # Database
