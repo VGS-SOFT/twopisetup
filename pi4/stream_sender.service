@@ -1,14 +1,15 @@
 [Unit]
-Description=Pi4 Gate Camera UDP Stream Sender
+Description=Pi4 Camera UDP Sender — 180p30 H.264
 After=network-online.target
 Wants=network-online.target
 
 [Service]
+Type=simple
 User=vraj
-WorkingDirectory=/home/vraj/Projects/twopisetup/pi4
-ExecStart=/home/vraj/Projects/twopisetup/pi4/stream_sender.sh
+WorkingDirectory=/home/vraj/twopisetup/pi4
+ExecStart=/bin/bash /home/vraj/twopisetup/pi4/stream_sender.sh <PIANPR_IP>
 Restart=always
-RestartSec=5
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target

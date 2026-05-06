@@ -1,0 +1,32 @@
+# ============================================================
+# MediaMTX config for piANPR receiver
+# Ingests MPEG-TS H.264 from Pi4 over UDP:5555
+# Serves the stream via WebRTC WHEP on port 8889
+# ============================================================
+
+logLevel: info
+logDestinations: [stdout]
+
+# WebRTC — browser gets stream from here
+webrtcAddress: :8889
+webrtcICEServers: []
+
+# Disable everything we are not using
+rtspAddress:    :8554
+rtmpAddress:    :1935
+hls:            no
+hlsAddress:     :8888
+record:         no
+
+paths:
+  gate:
+    # Ingest from Pi4 UDP MPEG-TS
+    source: udp://@:5555
+    sourceProtocol: udp
+    # No auth — LAN only
+    readUser:
+    readPass:
+    # Low-latency buffer: keep only 1 segment in play
+    llhls: no
+    # Overwrite with live — drop stale frames
+    overridePublisher: yes

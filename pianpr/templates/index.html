@@ -1,100 +1,221 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>piANPR — Gate Dashboard</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ANPR Live Feed</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f0f0f;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 1.5rem;
+      gap: 1.25rem;
+    }
+    h1 { font-size: 1.3rem; letter-spacing: 0.05em; color: #fff; }
+
+    /* ── video player ── */
+    #videoWrap {
+      width: 100%;
+      max-width: 720px;
+      aspect-ratio: 16/9;
+      background: #1a1a1a;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+    video {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    #status {
+      position: absolute;
+      top: 8px; left: 12px;
+      font-size: 0.75rem;
+      background: rgba(0,0,0,0.6);
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: #7fff7f;
+    }
+
+    /* ── stats bar ── */
+    #stats {
+      width: 100%;
+      max-width: 720px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.75rem;
+    }
+    .stat {
+      background: #1c1c1c;
+      border-radius: 6px;
+      padding: 0.6rem 0.9rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .stat-label { font-size: 0.65rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat-value { font-size: 1.1rem; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+
+    /* ── detections log ── */
+    #log {
+      width: 100%;
+      max-width: 720px;
+      background: #1a1a1a;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    #log h2 { padding: 0.6rem 1rem; font-size: 0.8rem; color: #888; background: #141414; letter-spacing: 0.05em; }
+    #log ul { list-style: none; max-height: 200px; overflow-y: auto; padding: 0.5rem 0; }
+    #log li {
+      padding: 0.35rem 1rem;
+      font-size: 0.85rem;
+      border-bottom: 1px solid #222;
+      display: flex;
+      justify-content: space-between;
+    }
+    #log li .plate { color: #4fc3f7; font-weight: 600; letter-spacing: 0.08em; }
+    #log li .conf  { color: #888; font-size: 0.75rem; }
+  </style>
 </head>
 <body>
+  <h1>ANPR LIVE FEED</h1>
 
-  <header>
-    <div class="logo">
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-label="piANPR">
-        <rect x="2" y="7" width="24" height="14" rx="3" stroke="currentColor" stroke-width="2"/>
-        <rect x="6" y="11" width="16" height="6" rx="1" fill="currentColor" opacity="0.15"/>
-        <text x="14" y="16.5" text-anchor="middle" font-size="5" font-family="monospace" fill="currentColor" font-weight="bold">ANPR</text>
-        <circle cx="5" cy="23" r="2" fill="currentColor" opacity="0.5"/>
-        <circle cx="23" cy="23" r="2" fill="currentColor" opacity="0.5"/>
-      </svg>
-      <span>piANPR</span>
-    </div>
-    <div class="status-bar">
-      <span id="stream-status" class="badge badge--error">Stream: Connecting...</span>
-      <span id="detection-status" class="badge badge--muted">Detection: Waiting</span>
-      <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">&#9790;</button>
-    </div>
-  </header>
-
-  <!-- Live stats bar -->
-  <div class="stats-bar">
-    <div class="stat-item">
-      <span class="stat-label">FPS</span>
-      <span class="stat-value" id="stat-fps">--</span>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat-item">
-      <span class="stat-label">BITRATE</span>
-      <span class="stat-value" id="stat-bitrate">-- kbps</span>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat-item">
-      <span class="stat-label">PING</span>
-      <span class="stat-value" id="stat-ping">-- ms</span>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat-item">
-      <span class="stat-label">DATA RX</span>
-      <span class="stat-value" id="stat-bytes">-- MB</span>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat-item">
-      <span class="stat-label">PACKETS</span>
-      <span class="stat-value" id="stat-packets">--</span>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat-item">
-      <span class="stat-label">LOST</span>
-      <span class="stat-value" id="stat-lost">--</span>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat-item">
-      <span class="stat-label">RESOLUTION</span>
-      <span class="stat-value" id="stat-res">--</span>
-    </div>
+  <div id="videoWrap">
+    <video id="vid" autoplay playsinline muted></video>
+    <span id="status">Connecting…</span>
   </div>
 
-  <main>
-    <section class="feed-section">
-      <div class="video-wrapper">
-        <video id="live-feed" autoplay playsinline muted></video>
-        <canvas id="overlay"></canvas>
-        <div id="no-signal" class="no-signal">Connecting to stream...</div>
-      </div>
-    </section>
+  <div id="stats">
+    <div class="stat"><span class="stat-label">FPS</span><span class="stat-value" id="sFps">—</span></div>
+    <div class="stat"><span class="stat-label">Latency</span><span class="stat-value" id="sLat">—</span></div>
+    <div class="stat"><span class="stat-label">Packets lost</span><span class="stat-value" id="sLoss">—</span></div>
+    <div class="stat"><span class="stat-label">Bitrate in</span><span class="stat-value" id="sBr">—</span></div>
+    <div class="stat"><span class="stat-label">Jitter</span><span class="stat-value" id="sJit">—</span></div>
+    <div class="stat"><span class="stat-label">Resolution</span><span class="stat-value" id="sRes">—</span></div>
+  </div>
 
-    <aside class="panel">
-      <div class="last-plate">
-        <p class="panel-label">Last Detected Plate</p>
-        <div id="plate-text" class="plate-display">---</div>
-        <div id="plate-time" class="plate-time"></div>
-        <div id="plate-conf" class="plate-conf"></div>
-      </div>
+  <div id="log">
+    <h2>DETECTED PLATES</h2>
+    <ul id="plateLog"></ul>
+  </div>
 
-      <div class="log-section">
-        <p class="panel-label">Detection Log</p>
-        <table class="log-table">
-          <thead>
-            <tr><th>Plate</th><th>Conf</th><th>Time</th></tr>
-          </thead>
-          <tbody id="log-body">
-            <tr><td colspan="3" class="empty-row">No detections yet</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </aside>
-  </main>
+<script>
+// ── WebRTC WHEP connection to MediaMTX ────────────────────────
+const WHEP_URL = `http://${location.hostname}:8889/gate/whep`;
+const video    = document.getElementById('vid');
+const status   = document.getElementById('status');
 
-  <script src="/static/dashboard.js"></script>
+let pc;
+
+async function startWebRTC() {
+  pc = new RTCPeerConnection({
+    iceServers: [],    // LAN only, no STUN needed
+    bundlePolicy: 'max-bundle'
+  });
+
+  pc.addTransceiver('video', { direction: 'recvonly' });
+
+  pc.ontrack = e => {
+    video.srcObject = e.streams[0];
+    status.textContent = 'Live';
+    status.style.color = '#7fff7f';
+    startStats(pc);
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      status.textContent = 'Reconnecting…';
+      status.style.color = '#ffcc00';
+      setTimeout(startWebRTC, 2000);
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  const resp = await fetch(WHEP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sdp' },
+    body: pc.localDescription.sdp
+  });
+
+  if (!resp.ok) {
+    status.textContent = 'MediaMTX not ready — retrying…';
+    status.style.color = '#ff6666';
+    setTimeout(startWebRTC, 3000);
+    return;
+  }
+
+  const answer = await resp.text();
+  await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+}
+
+// ── Live stats from WebRTC getStats() — no server polling ────
+let prevBytes = 0, prevTs = 0, prevFrames = 0;
+
+function startStats(pc) {
+  setInterval(async () => {
+    const reports = await pc.getStats();
+    reports.forEach(r => {
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        const now    = r.timestamp;
+        const dt     = (now - prevTs) / 1000 || 1;
+        const dBytes = r.bytesReceived - prevBytes;
+        const dFrames= r.framesDecoded - prevFrames;
+
+        const fps    = (dFrames / dt).toFixed(1);
+        const br     = ((dBytes * 8) / dt / 1000).toFixed(0);  // kbps
+        const jitter = (r.jitter * 1000).toFixed(1);           // ms
+        const lost   = r.packetsLost ?? 0;
+        const lat    = r.estimatedPlayoutTimestamp
+                       ? ((performance.now() - (r.estimatedPlayoutTimestamp - performance.timeOrigin)) / 1000).toFixed(0) + ' ms'
+                       : '—';
+        const width  = r.frameWidth  ?? '—';
+        const height = r.frameHeight ?? '—';
+
+        document.getElementById('sFps').textContent  = fps + ' fps';
+        document.getElementById('sBr').textContent   = br  + ' kbps';
+        document.getElementById('sJit').textContent  = jitter + ' ms';
+        document.getElementById('sLoss').textContent = lost;
+        document.getElementById('sRes').textContent  = `${width}×${height}`;
+        document.getElementById('sLat').textContent  = lat;
+
+        prevBytes  = r.bytesReceived;
+        prevTs     = now;
+        prevFrames = r.framesDecoded;
+      }
+    });
+  }, 1000);   // updates every 1 second — fully live, no server call
+}
+
+// ── WebSocket for ANPR plate results ─────────────────────────
+const ws = new WebSocket(`ws://${location.host}/ws`);
+
+ws.onmessage = e => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === 'plate') {
+    const li = document.createElement('li');
+    const d  = msg.data;
+    const t  = new Date(d.ts * 1000).toLocaleTimeString();
+    li.innerHTML = `<span class="plate">${d.plate}</span>
+                    <span class="conf">${(d.confidence*100).toFixed(0)}%  ${t}</span>`;
+    const ul = document.getElementById('plateLog');
+    ul.prepend(li);
+    if (ul.children.length > 50) ul.removeChild(ul.lastChild);
+  }
+};
+
+// keep WS alive
+setInterval(() => ws.readyState === 1 && ws.send('ping'), 10000);
+
+startWebRTC();
+</script>
 </body>
 </html>

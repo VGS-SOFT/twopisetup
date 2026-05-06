@@ -1,19 +1,40 @@
 #!/bin/bash
-# Pi4 Gate Camera - UDP Stream Sender
-# Streams 720p30 H.264 via MPEG-TS to piANPR on port 5555
+# ============================================================
+# Pi4 Camera Sender — 180p30 H.264 over UDP
+# Target: piANPR at PIANPR_IP:5555
+# Codec:  Hardware H.264 via V4L2 (no software encode)
+# Bitrate: 2000000 (2 Mbps — highest useful for 320x180)
+# Low-latency: intra-refresh every 30 frames, no B-frames
+# ============================================================
 
-PIANPR_IP="192.168.137.200"
-PORT="5555"
+PIANPR_IP="${1:-192.168.1.100}"   # pass IP as argument or edit default
+PORT=5555
+BITRATE=2000000                    # 2 Mbps — overkill for 180p, crystal clear
+FPS=30
+WIDTH=320
+HEIGHT=180
 
-echo "[pi4] Starting UDP stream to ${PIANPR_IP}:${PORT}..."
+echo "[Pi4 Sender] Starting 180p30 H.264 UDP stream"
+echo "  Target  : udp://${PIANPR_IP}:${PORT}"
+echo "  Bitrate : ${BITRATE} bps"
+echo "  Size    : ${WIDTH}x${HEIGHT} @ ${FPS}fps"
+echo ""
 
-rpicam-vid -t 0 \
+rpicam-vid \
+  --width  ${WIDTH} \
+  --height ${HEIGHT} \
+  --framerate ${FPS} \
+  --bitrate ${BITRATE} \
+  --intra 30 \
+  --profile baseline \
+  --level 4.0 \
+  --codec h264 \
   --nopreview \
-  --inline \
-  --width 1280 \
-  --height 720 \
-  --framerate 30 \
-  --bitrate 8000000 \
-  --codec libav \
-  --libav-format mpegts \
-  -o udp://${PIANPR_IP}:${PORT}
+  --timeout 0 \
+  --output - | \
+ffmpeg -loglevel warning \
+  -f h264 \
+  -i pipe:0 \
+  -c:v copy \
+  -f mpegts \
+  "udp://${PIANPR_IP}:${PORT}?pkt_size=1316&buffer_size=0"

@@ -1,80 +1,80 @@
-"""
-stream_ingest.py
+# ============================================================
+# StreamIngest — reads UDP MPEG-TS stream from Pi4
+# Runs ANPR detection on each frame independently
+# Does NOT touch the MediaMTX video path
+# ============================================================
 
-Continuously ingests the UDP/MPEG-TS stream from Pi4.
-Always keeps only the FRESHEST frame available.
-Uses grab+retrieve pattern to prevent stale frame buildup.
-"""
+import asyncio
+import logging
+import time
 
 import cv2
-import threading
-import time
-import logging
+import numpy as np
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger("stream_ingest")
 
-UDP_URL = "udp://@:5555"
+UDP_URL = "udp://@:5555"   # same port as Pi4 sends to
+ANPR_INTERVAL = 0.5         # run ANPR at most every 500 ms
 
 
 class StreamIngest:
     def __init__(self):
-        self.frame = None
-        self.lock = threading.Lock()
-        self.running = False
-        self._thread = None
         self.cap = None
-        self.connected = False
+        self._last_anpr = 0.0
 
-    def start(self):
-        self.running = True
-        self._thread = threading.Thread(target=self._ingest_loop, daemon=True)
-        self._thread.start()
-        logger.info("[StreamIngest] Started ingest thread")
+    def _open(self):
+        log.info(f"[StreamIngest] Connecting to {UDP_URL}")
+        cap = cv2.VideoCapture(
+            f"{UDP_URL}",
+            cv2.CAP_FFMPEG
+        )
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # keep buffer minimal
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open stream: {UDP_URL}")
+        return cap
 
-    def stop(self):
-        self.running = False
-        if self.cap:
-            self.cap.release()
-        logger.info("[StreamIngest] Stopped")
+    async def run(self, db, broadcast):
+        """Main loop — opens stream, reads frames, triggers ANPR."""
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+            	self.cap = await loop.run_in_executor(None, self._open)
+            	log.info("[StreamIngest] Stream opened")
+            	await self._read_loop(db, broadcast, loop)
+            except Exception as e:
+                log.warning(f"[StreamIngest] Stream error: {e} — reconnecting in 2s")
+                if self.cap:
+                    self.cap.release()
+                await asyncio.sleep(2)
 
-    def _ingest_loop(self):
-        while self.running:
-            logger.info(f"[StreamIngest] Connecting to {UDP_URL}...")
-            self.cap = cv2.VideoCapture(UDP_URL, cv2.CAP_FFMPEG)
+    async def _read_loop(self, db, broadcast, loop):
+        while True:
+            ret, frame = await loop.run_in_executor(None, self.cap.read)
+            if not ret:
+                log.warning("[StreamIngest] Frame read failed")
+                break
 
-            if not self.cap.isOpened():
-                logger.warning("[StreamIngest] Could not open stream. Retrying in 3s...")
-                time.sleep(3)
-                continue
+            now = time.monotonic()
+            if now - self._last_anpr >= ANPR_INTERVAL:
+                self._last_anpr = now
+                asyncio.create_task(
+                    self._run_anpr(frame, db, broadcast)
+                )
 
-            self.connected = True
-            logger.info("[StreamIngest] Stream connected.")
-
-            while self.running:
-                # grab() flushes the buffer - always gets the newest frame
-                grabbed = self.cap.grab()
-                if not grabbed:
-                    logger.warning("[StreamIngest] Lost stream. Reconnecting...")
-                    self.connected = False
-                    break
-
-                ret, frame = self.cap.retrieve()
-                if ret and frame is not None:
-                    with self.lock:
-                        self.frame = frame
-
-            self.cap.release()
-            time.sleep(2)  # brief pause before reconnect attempt
-
-    def get_frame(self):
-        """Returns the latest frame, or None if not yet available."""
-        with self.lock:
-            return self.frame.copy() if self.frame is not None else None
-
-    @property
-    def is_connected(self):
-        return self.connected
+    async def _run_anpr(self, frame, db, broadcast):
+        """Placeholder — wire in your YOLO + OCR pipeline here."""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _detect_plate, frame)
+        if result:
+            db.save(result)
+            await broadcast({"type": "plate", "data": result})
 
 
-# Global singleton — shared across app.py, webrtc_track.py, anpr_pipeline.py
-stream = StreamIngest()
+def _detect_plate(frame: np.ndarray) -> dict | None:
+    """
+    Replace this stub with your YOLO + OCR logic.
+    Return a dict like:
+      {"plate": "GJ01AB1234", "confidence": 0.91, "ts": time.time()}
+    or None if no plate found.
+    """
+    return None
