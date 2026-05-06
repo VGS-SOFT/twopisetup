@@ -13,7 +13,16 @@ import numpy as np
 
 log = logging.getLogger("stream_ingest")
 
-UDP_URL = "udp://@:5555"   # same port as Pi4 sends to
+# MPEG-TS over UDP — must match how Pi4 sends it
+# ffmpeg wraps H.264 in MPEG-TS, so we tell OpenCV to expect mpegts
+UDP_URL = "udp://@:5555"
+CV_OPTS  = [
+    "protocol_whitelist", "udp,rtp,file,crypto",
+    "fflags", "nobuffer",
+    "flags", "low_delay",
+    "max_delay", "0",
+    "reorder_queue_size", "0",
+]
 ANPR_INTERVAL = 0.5         # run ANPR at most every 500 ms
 
 
@@ -24,13 +33,19 @@ class StreamIngest:
 
     def _open(self):
         log.info(f"[StreamIngest] Connecting to {UDP_URL}")
-        cap = cv2.VideoCapture(
-            f"{UDP_URL}",
-            cv2.CAP_FFMPEG
+        # Build GStreamer-style ffmpeg pipeline string for OpenCV
+        # Using CAP_FFMPEG with explicit low-latency options via env isn't
+        # possible directly, so we use the pipe URL with options embedded
+        url = (
+            f"udp://@:5555"
+            f"?fifo_size=1000000"
+            f"&overrun_nonfatal=1"
+            f"&timeout=5000000"
         )
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # keep buffer minimal
+        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open stream: {UDP_URL}")
+            raise RuntimeError(f"Cannot open stream: {url}")
         return cap
 
     async def run(self, db, broadcast):
@@ -38,9 +53,9 @@ class StreamIngest:
         loop = asyncio.get_event_loop()
         while True:
             try:
-            	self.cap = await loop.run_in_executor(None, self._open)
-            	log.info("[StreamIngest] Stream opened")
-            	await self._read_loop(db, broadcast, loop)
+                self.cap = await loop.run_in_executor(None, self._open)
+                log.info("[StreamIngest] Stream opened")
+                await self._read_loop(db, broadcast, loop)
             except Exception as e:
                 log.warning(f"[StreamIngest] Stream error: {e} — reconnecting in 2s")
                 if self.cap:
